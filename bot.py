@@ -1,154 +1,165 @@
-import os
-import asyncio
 import logging
 import requests
 from bs4 import BeautifulSoup
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, JobQueue
+import os
+import asyncio
 
 # Logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
-# Token del bot
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHANNEL_ID = "@pokemonmonitorpanda"  # canale dove inviare le notifiche
+TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = os.getenv("CHANNEL_ID")
 
-# Dizionario prodotti: {ASIN: {"url": ..., "price": ..., "title": ..., "image": ...}}
+# Placeholder se non troviamo immagine
+PLACEHOLDER_IMG = "https://i.imgur.com/8fKQZt6.png"
+
+# Lista prodotti {url, prezzo, titolo}
 products = {}
 
-# Funzione per ottenere dati prodotto da Amazon
-def get_amazon_data(url):
+# =====================
+# Funzione scraping Amazon
+# =====================
+def scrape_amazon(url: str):
     headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(url, headers=headers)
-    soup = BeautifulSoup(r.text, "html.parser")
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, "lxml")
 
-    # Titolo
-    title = soup.find("span", {"id": "productTitle"})
-    title = title.get_text(strip=True) if title else "Prodotto sconosciuto"
+        title = soup.find("span", {"id": "productTitle"})
+        title = title.get_text(strip=True) if title else "Prodotto sconosciuto"
 
-    # Prezzo
-    price_tag = soup.find("span", {"class": "a-price-whole"})
-    price = None
-    if price_tag:
-        try:
-            price = float(price_tag.get_text(strip=True).replace(".", "").replace(",", "."))
-        except:
+        price_whole = soup.find("span", {"class": "a-price-whole"})
+        price_frac = soup.find("span", {"class": "a-price-fraction"})
+        if price_whole:
+            price = float(price_whole.get_text().replace(".", "").replace(",", ".") +
+                          (price_frac.get_text() if price_frac else "0"))
+        else:
             price = None
 
-    # Immagine
-    img_tag = soup.find("img", {"id": "landingImage"})
-    image = img_tag["src"] if img_tag else None
+        img_tag = soup.find("img", {"id": "landingImage"})
+        image_url = img_tag["src"] if img_tag else PLACEHOLDER_IMG
 
-    return title, price, image
+        return {"title": title, "price": price, "image": image_url}
+    except Exception as e:
+        logging.error(f"Errore scraping: {e}")
+        return None
 
-# Funzione add prodotto
-async def add_product(update, context):
+# =====================
+# Aggiungi prodotto
+# =====================
+async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text("Usa: /add <url> <prezzo_max>")
+        return
+
+    url = context.args[0]
     try:
-        url = context.args[0]
-        price_limit = float(context.args[1])
-    except:
-        await update.message.reply_text("❌ Usa: /add <link_amazon> <prezzo_max>")
+        max_price = float(context.args[1])
+    except ValueError:
+        await update.message.reply_text("Prezzo non valido.")
         return
 
-    if "/dp/" not in url:
-        await update.message.reply_text("❌ Link Amazon non valido")
+    data = scrape_amazon(url)
+    if not data:
+        await update.message.reply_text("Errore durante lo scraping.")
         return
 
-    asin = url.split("/dp/")[1].split("/")[0]
-    title, price, image = get_amazon_data(url)
+    products[url] = {"max_price": max_price, "title": data["title"]}
+    await update.message.reply_text(f"✅ Aggiunto:\n{data['title']}\nPrezzo max: {max_price}€")
 
-    products[asin] = {"url": url, "price": price_limit, "title": title, "image": image}
-    await update.message.reply_text(f"✅ Prodotto aggiunto:\n{title}\n💶 Soglia: {price_limit}€")
-
-# Funzione remove prodotto
-async def remove_product(update, context):
-    try:
-        asin = context.args[0]
-    except:
-        await update.message.reply_text("❌ Usa: /remove <ASIN>")
+# =====================
+# Rimuovi prodotto
+# =====================
+async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usa: /remove <url>")
         return
-
-    if asin in products:
-        del products[asin]
-        await update.message.reply_text(f"🗑 Prodotto {asin} rimosso")
+    url = context.args[0]
+    if url in products:
+        del products[url]
+        await update.message.reply_text("🗑️ Prodotto rimosso.")
     else:
-        await update.message.reply_text("❌ ASIN non trovato")
+        await update.message.reply_text("Prodotto non trovato.")
 
+# =====================
 # Lista prodotti
-async def list_products(update, context):
+# =====================
+async def list_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not products:
-        await update.message.reply_text("📭 Nessun prodotto monitorato")
+        await update.message.reply_text("Nessun prodotto monitorato.")
         return
-
-    msg = "📋 Prodotti monitorati:\n\n"
-    for asin, data in products.items():
-        msg += f"- {data['title']} (ASIN: {asin}) → {data['price']}€\n"
+    msg = "📋 Prodotti monitorati:\n"
+    for url, data in products.items():
+        msg += f"- {data['title']} (max {data['max_price']}€)\n"
     await update.message.reply_text(msg)
 
-# Monitoraggio prezzi
-async def check_products(bot):
-    while True:
-        for asin, data in list(products.items()):
-            title, price, image = get_amazon_data(data["url"])
-            if price and price <= data["price"]:
-                logger.info(f"RESTOCK trovato: {title} a {price}€")
-
-                # Link checkout diretto
-                link_x1 = f"https://www.amazon.it/gp/aws/cart/add.html?ASIN.1={asin}&Quantity.1=1"
-                link_x2 = f"https://www.amazon.it/gp/aws/cart/add.html?ASIN.1={asin}&Quantity.1=2"
-
-                buttons = [
-                    [InlineKeyboardButton("⚡ x1 Acquisto", url=link_x1)],
-                    [InlineKeyboardButton("⚡ x2 Acquisto", url=link_x2)]
-                ]
-                reply_markup = InlineKeyboardMarkup(buttons)
-
-                text = (
-                    f"🔥 <b>RESTOCK!</b>\n\n"
-                    f"📦 {title}\n"
-                    f"🏷 Prezzo: <b>{price}€</b>\n"
-                    f"🛒 Venduto da: Amazon\n\n"
-                    f"⬇️ Per acquistare clicca sui pulsanti qui sotto"
-                )
-
-                try:
-                    await bot.send_photo(
-                        chat_id=CHANNEL_ID,
-                        photo=image if image else "https://i.imgur.com/placeholder.png",
-                        caption=text,
-                        parse_mode="HTML",
-                        reply_markup=reply_markup
-                    )
-                except Exception as e:
-                    logger.error(f"Errore invio messaggio: {e}")
-
-        await asyncio.sleep(5)  # ogni 5 secondi
-
-# Comando help
-async def help_cmd(update, context):
+# =====================
+# Comandi disponibili
+# =====================
+async def commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "📌 <b>Comandi disponibili</b>\n\n"
-        "/add <link_amazon> <prezzo> → aggiunge un prodotto da monitorare\n"
-        "/remove <ASIN> → rimuove un prodotto\n"
-        "/list → mostra i prodotti monitorati\n"
-        "/help → mostra questo messaggio"
+        "🤖 Comandi disponibili:\n\n"
+        "/add <url> <prezzo> → aggiungi prodotto\n"
+        "/remove <url> → rimuovi prodotto\n"
+        "/list → lista prodotti monitorati\n"
+        "/commands → mostra questo messaggio"
     )
-    await update.message.reply_text(msg, parse_mode="HTML")
+    await update.message.reply_text(msg)
 
-# Avvio bot
+# =====================
+# Check prezzi periodici
+# =====================
+async def check_prices(context: ContextTypes.DEFAULT_TYPE):
+    for url, data in products.items():
+        scraped = scrape_amazon(url)
+        if not scraped or not scraped["price"]:
+            continue
+
+        if scraped["price"] <= data["max_price"]:
+            text = (
+                f"🔥 <b>RESTOCK!</b>\n\n"
+                f"{scraped['title']}\n"
+                f"💶 Prezzo: {scraped['price']}€\n"
+                f"🏬 Venduto da: Amazon\n\n"
+                f"🔗 Per acquistare durante un Restock:\n"
+                f"⬇️ Clicca sui pulsanti Acquisto Lampo (x1 o x2) qui sotto"
+            )
+
+            keyboard = [
+                [InlineKeyboardButton("x1 Acquisto ⚡", url=f"{url}?quantity=1&buy-now=1")],
+                [InlineKeyboardButton("x2 Acquisto ⚡", url=f"{url}?quantity=2&buy-now=1")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            try:
+                await context.bot.send_photo(
+                    chat_id=CHANNEL_ID,
+                    photo=scraped["image"],
+                    caption=text,
+                    parse_mode="HTML",
+                    reply_markup=reply_markup
+                )
+            except Exception as e:
+                logging.error(f"Errore invio messaggio: {e}")
+
+# =====================
+# Main
+# =====================
 def main():
-    application = Application.builder().token(TOKEN).build()
+    app = Application.builder().token(TOKEN).build()
 
-    application.add_handler(CommandHandler("add", add_product))
-    application.add_handler(CommandHandler("remove", remove_product))
-    application.add_handler(CommandHandler("list", list_products))
-    application.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("add", add))
+    app.add_handler(CommandHandler("remove", remove))
+    app.add_handler(CommandHandler("list", list_products))
+    app.add_handler(CommandHandler("commands", commands))
 
-    bot = Bot(TOKEN)
-    application.job_queue.run_once(lambda _: asyncio.create_task(check_products(bot)), when=1)
+    app.job_queue.run_repeating(check_prices, interval=5, first=5)
 
-    application.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
