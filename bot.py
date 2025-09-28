@@ -1,171 +1,112 @@
 import os
 import logging
-import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-)
-import asyncio
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 
-# ======================
-# CONFIGURAZIONE BASE
-# ======================
-TOKEN = os.getenv("TELEGRAM_TOKEN")  # Impostato su Railway
-CHAT_ID = os.getenv("CHAT_ID")       # ID chat opzionale (per notifiche automatiche)
-
+# Logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
+logger = logging.getLogger(__name__)
 
-products = []  # Lista prodotti monitorati
-
-
-# ======================
-# FUNZIONI AMAZON
-# ======================
-def extract_asin(url: str) -> str:
-    """Estrae l'ASIN da un link Amazon"""
-    try:
-        parts = url.split("/dp/")
-        if len(parts) > 1:
-            return parts[1].split("/")[0].split("?")[0]
-    except:
-        return None
-    return None
+# Token e Chat ID
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@pokemonmonitorpanda")
 
 
-def get_price(url: str) -> float:
-    """Ottiene il prezzo dal link Amazon (mock semplice con requests)"""
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        }
-        r = requests.get(url, headers=headers, timeout=10)
-        text = r.text
+# --- COMANDI ---
 
-        # ⚠️ MOCK: qui dovresti fare scraping con regex o libreria parsing HTML
-        # Per esempio ora restituiamo prezzo fittizio
-        import random
-        return round(random.uniform(10, 200), 2)
-
-    except Exception as e:
-        logging.error(f"Errore nel recupero prezzo: {e}")
-        return None
-
-
-async def notify_price_drop(application, chat_id, info, price):
-    """Invia la notifica con i bottoni checkout"""
-    asin = extract_asin(info["url"])
-    if not asin:
-        return
-
-    link1 = f"https://www.amazon.it/gp/aws/cart/add.html?ASIN.1={asin}&Quantity.1=1"
-    link2 = f"https://www.amazon.it/gp/aws/cart/add.html?ASIN.1={asin}&Quantity.1=2"
-
-    keyboard = [
-        [
-            InlineKeyboardButton("x1 Acquisto ⚡", url=link1),
-            InlineKeyboardButton("x2 Acquisto ⚡", url=link2),
-        ]
-    ]
-
-    await application.bot.send_message(
-        chat_id=chat_id,
-        text=(
-            f"🔥 RESTOCK o prezzo in calo!\n\n"
-            f"{info['title']}\n"
-            f"💰 Prezzo attuale: {price}€\n"
-            f"🎯 Target: {info['target']}€\n\n"
-            f"🔗 {info['url']}"
-        ),
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
-
-
-# ======================
-# COMANDI TELEGRAM
-# ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Messaggio di benvenuto"""
     await update.message.reply_text(
-        "👋 Ciao! Sono il bot MonitorPikemonPanda.\n"
+        "👋 Ciao! Sono MonitorPokemonPanda.\n"
         "Usa /help per vedere i comandi disponibili."
     )
 
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mostra i comandi disponibili"""
     await update.message.reply_text(
-        "📌 Comandi disponibili:\n\n"
+        "📋 Lista comandi disponibili:\n\n"
         "/start - Avvia il bot\n"
-        "/add <url> <prezzo> - Aggiungi prodotto da monitorare\n"
+        "/help - Mostra i comandi\n"
+        "/add <nome prodotto> <link amazon> <prezzo> - Aggiungi un prodotto\n"
         "/list - Mostra i prodotti monitorati\n"
-        "/help - Mostra questo messaggio"
+        "/send <messaggio> - Invia un messaggio al canale\n"
     )
 
 
-async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 2:
-        await update.message.reply_text("❌ Usa: /add <url> <prezzo>")
-        return
-
-    url = context.args[0]
+async def add_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Aggiunge un prodotto al monitoraggio"""
     try:
-        target = float(context.args[1])
-    except:
-        await update.message.reply_text("❌ Prezzo non valido.")
-        return
+        text = " ".join(context.args)
+        if not text:
+            await update.message.reply_text("⚠️ Usa il formato:\n/add NomeProdotto link prezzo")
+            return
 
-    title = f"Prodotto {len(products)+1}"
-    products.append({"url": url, "target": target, "title": title})
-
-    await update.message.reply_text(
-        f"✅ Prodotto aggiunto:\n{title}\n🎯 Target: {target}€"
-    )
+        await update.message.reply_text(f"✅ Prodotto aggiunto: {text}")
+    except Exception as e:
+        logger.error(f"Errore add_product: {e}")
+        await update.message.reply_text("❌ Errore durante l'aggiunta del prodotto.")
 
 
 async def list_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not products:
-        await update.message.reply_text("📭 Nessun prodotto monitorato.")
+    """Lista prodotti (placeholder, puoi collegarlo al DB più avanti)"""
+    await update.message.reply_text("📦 Al momento non ci sono prodotti salvati.")
+
+
+async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Invia un messaggio al canale"""
+    if not context.args:
+        await update.message.reply_text("⚠️ Usa il formato:\n/send messaggio da inviare")
         return
 
-    msg = "📋 Prodotti monitorati:\n\n"
-    for i, p in enumerate(products, 1):
-        msg += f"{i}. {p['title']} - Target: {p['target']}€\n{p['url']}\n\n"
+    text = " ".join(context.args)
 
-    await update.message.reply_text(msg)
+    # Bottoni Acquisto x1 e x2
+    keyboard = [
+        [
+            InlineKeyboardButton("x1 Acquisto ⚡", url="https://www.amazon.it/gp/aws/cart/add.html?ASIN.1=B0XXXXXX&Quantity.1=1"),
+            InlineKeyboardButton("x2 Acquisto ⚡", url="https://www.amazon.it/gp/aws/cart/add.html?ASIN.1=B0XXXXXX&Quantity.1=2"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await context.bot.send_message(
+        chat_id=CHANNEL_ID,
+        text=f"🔥 RESTOCK!\n\n{text}",
+        reply_markup=reply_markup
+    )
+
+    await update.message.reply_text("✅ Messaggio inviato al canale!")
 
 
-# ======================
-# TASK AUTOMATICO
-# ======================
-async def price_checker(application):
-    while True:
-        logging.info("🔎 Controllo prezzi...")
-        for info in products:
-            price = get_price(info["url"])
-            if price and price <= info["target"]:
-                await notify_price_drop(application, CHAT_ID, info, price)
-        await asyncio.sleep(300)  # ogni 5 minuti
+# --- SCHEDULER (job_queue) ---
+
+async def price_checker(context: ContextTypes.DEFAULT_TYPE):
+    """Controlla prezzi (placeholder)"""
+    logger.info("Eseguo controllo prezzi...")
+    # Qui più avanti metti scraping o API Amazon
 
 
-# ======================
-# MAIN
-# ======================
+# --- MAIN ---
+
 def main():
     application = Application.builder().token(TOKEN).build()
 
-    # Handlers
+    # Comandi
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_cmd))
-    application.add_handler(CommandHandler("add", add))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("add", add_product))
     application.add_handler(CommandHandler("list", list_products))
+    application.add_handler(CommandHandler("send", send_message))
 
-    # Avvio del controllo prezzi in background
-    application.job_queue.run_once(lambda ctx: asyncio.create_task(price_checker(application)), 1)
+    # Job queue ogni 60 secondi
+    job_queue = application.job_queue
+    job_queue.run_repeating(price_checker, interval=60, first=5)
 
-    # Avvio bot
+    # Avvia il bot
     application.run_polling()
 
 
