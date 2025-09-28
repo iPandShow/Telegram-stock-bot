@@ -21,7 +21,6 @@ CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@pokemonmonitorpanda")
 
 PRODUCTS_FILE = "products.json"
 
-
 # --- GESTIONE FILE JSON ---
 def load_products():
     if not os.path.exists(PRODUCTS_FILE):
@@ -36,8 +35,8 @@ def save_products(products):
 
 
 # --- FUNZIONI AMAZON ---
-def get_product_info(url):
-    """Ritorna (disponibile, prezzo, titolo, immagine) da una pagina Amazon (molto base)."""
+def get_price_and_stock(url):
+    """Ritorna (disponibile, prezzo) da una pagina Amazon"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     }
@@ -45,37 +44,69 @@ def get_product_info(url):
         r = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(r.text, "html.parser")
 
-        # Titolo
-        title_tag = soup.find("span", {"id": "productTitle"})
-        title = title_tag.get_text(strip=True) if title_tag else "Prodotto sconosciuto"
-
-        # Prezzo
+        # Trova prezzo
         price_tag = soup.find("span", {"class": "a-price-whole"})
         if not price_tag:
-            return False, None, title, None
+            return False, None
         price = int(price_tag.get_text().replace(".", "").replace(",", "").strip())
 
-        # Immagine
-        img_tag = soup.find("img", {"id": "landingImage"})
-        image = img_tag["src"] if img_tag else None
-
-        return True, price, title, image
+        return True, price
     except Exception as e:
         logger.error(f"Errore scraping {url}: {e}")
-        return False, None, "Errore", None
+        return False, None
+
+
+def get_checkout_links(url, tag="romoloepicc00-21"):
+    """Restituisce link diretti al checkout (x1 e x2) se disponibili"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # 1. Trova ASIN
+        asin = None
+        if "/dp/" in url:
+            asin = url.split("/dp/")[1].split("/")[0]
+        if not asin:
+            asin_tag = soup.find("input", {"id": "ASIN"})
+            if asin_tag:
+                asin = asin_tag.get("value")
+
+        # 2. Trova offeringID
+        offering_id = None
+        offering_tag = soup.find("input", {"name": "offeringID"})
+        if offering_tag:
+            offering_id = offering_tag.get("value")
+
+        if not asin or not offering_id:
+            return None, None
+
+        # 3. Costruisci link checkout
+        base = "https://www.amazon.it/gp/checkoutportal/enter-checkout.html/ref=dp_mw_buy_now"
+        link_x1 = f"{base}?asin={asin}&offeringID={offering_id}&buyNow=1&quantity=1&tag={tag}"
+        link_x2 = f"{base}?asin={asin}&offeringID={offering_id}&buyNow=1&quantity=2&tag={tag}"
+
+        return link_x1, link_x2
+
+    except Exception as e:
+        logger.error(f"Errore estrazione checkout da {url}: {e}")
+        return None, None
 
 
 # --- COMANDI TELEGRAM ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Ciao! Usa /help per vedere i comandi disponibili.")
+    await update.message.reply_text("👋 Benvenuto! Usa /help per vedere i comandi disponibili.")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "📋 Comandi disponibili:\n"
-        "/add <link> <prezzo> - Aggiungi un prodotto\n"
-        "/list - Mostra prodotti salvati\n"
-        "/remove <id> - Elimina prodotto\n"
+        "📋 *Comandi disponibili:*\n\n"
+        "/add <link> <prezzo> – Aggiungi un prodotto da monitorare\n"
+        "/list – Mostra prodotti salvati\n"
+        "/remove <id> – Elimina un prodotto\n",
+        parse_mode="Markdown"
     )
 
 
@@ -95,7 +126,7 @@ async def add_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     products.append({"url": url, "target": target_price})
     save_products(products)
 
-    await update.message.reply_text(f"✅ Prodotto aggiunto!\n{url}\nTarget: {target_price}€")
+    await update.message.reply_text(f"✅ Prodotto aggiunto!\n{url}\n🎯 Target: {target_price}€")
 
 
 async def list_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -104,10 +135,10 @@ async def list_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📦 Nessun prodotto salvato.")
         return
 
-    msg = "📋 Prodotti monitorati:\n\n"
+    msg = "📋 *Prodotti monitorati:*\n\n"
     for i, p in enumerate(products, start=1):
-        msg += f"{i}. {p['url']} → {p['target']}€\n"
-    await update.message.reply_text(msg)
+        msg += f"{i}. {p['url']} → 🎯 {p['target']}€\n"
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def remove_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -138,37 +169,29 @@ async def price_checker(context: ContextTypes.DEFAULT_TYPE):
         return
 
     for p in products:
-        available, price, title, image = get_product_info(p["url"])
+        available, price = get_price_and_stock(p["url"])
         if available and price is not None and price <= p["target"]:
-            text = (
-                f"🔥 <b>RESTOCK!</b>\n\n"
-                f"<b>{title}</b>\n\n"
-                f"💶 Prezzo attuale: <b>{price}€</b>\n"
-                f"🎯 Prezzo target: {p['target']}€\n"
-                f"🏬 Venduto da: Amazon\n\n"
-                f"🔗 Per acquistare durante un restock:\n"
-                f"⬇️ Clicca sui pulsanti Acquisto Lampo (x1 o x2) qui sotto"
-            )
+            link_x1, link_x2 = get_checkout_links(p["url"])
 
-            keyboard = [
-                [InlineKeyboardButton("x1 Acquisto ⚡", url=f"{p['url']}?quantity=1&buy-now=1")],
-                [InlineKeyboardButton("x2 Acquisto ⚡", url=f"{p['url']}?quantity=2&buy-now=1")],
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            if link_x1 and link_x2:
+                keyboard = [
+                    [
+                        InlineKeyboardButton("⚡ Acquisto x1", url=link_x1),
+                        InlineKeyboardButton("⚡ Acquisto x2", url=link_x2),
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
 
-            if image:
-                await context.bot.send_photo(
-                    chat_id=CHANNEL_ID,
-                    photo=image,
-                    caption=text,
-                    parse_mode="HTML",
-                    reply_markup=reply_markup
-                )
-            else:
                 await context.bot.send_message(
                     chat_id=CHANNEL_ID,
-                    text=text,
-                    parse_mode="HTML",
+                    text=(
+                        f"🔥 *RESTOCK DISPONIBILE!*\n\n"
+                        f"💰 Prezzo attuale: *{price}€*\n"
+                        f"🎯 Sotto il target impostato: {p['target']}€\n\n"
+                        f"🏪 Venduto da: *Amazon*\n\n"
+                        f"👇 Acquista subito con i pulsanti lampo qui sotto 👇"
+                    ),
+                    parse_mode="Markdown",
                     reply_markup=reply_markup
                 )
 
