@@ -2,11 +2,16 @@ import logging
 import requests
 from bs4 import BeautifulSoup
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, JobQueue
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+)
 import os
-import asyncio
 
+# =====================
 # Logging
+# =====================
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -17,7 +22,7 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 # Placeholder se non troviamo immagine
 PLACEHOLDER_IMG = "https://i.imgur.com/8fKQZt6.png"
 
-# Lista prodotti {url, prezzo, titolo}
+# Dizionario prodotti {url: {max_price, title}}
 products = {}
 
 # =====================
@@ -27,19 +32,26 @@ def scrape_amazon(url: str):
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            logging.warning(f"Amazon risposta {response.status_code}")
+            return None
+
         soup = BeautifulSoup(response.text, "lxml")
 
+        # Titolo
         title = soup.find("span", {"id": "productTitle"})
         title = title.get_text(strip=True) if title else "Prodotto sconosciuto"
 
+        # Prezzo
         price_whole = soup.find("span", {"class": "a-price-whole"})
         price_frac = soup.find("span", {"class": "a-price-fraction"})
         if price_whole:
-            price = float(price_whole.get_text().replace(".", "").replace(",", ".") +
-                          (price_frac.get_text() if price_frac else "0"))
+            price_str = price_whole.get_text().replace(".", "").replace(",", ".")
+            price = float(price_str + (price_frac.get_text() if price_frac else "0"))
         else:
             price = None
 
+        # Immagine
         img_tag = soup.find("img", {"id": "landingImage"})
         image_url = img_tag["src"] if img_tag else PLACEHOLDER_IMG
 
@@ -69,7 +81,10 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     products[url] = {"max_price": max_price, "title": data["title"]}
-    await update.message.reply_text(f"✅ Aggiunto:\n{data['title']}\nPrezzo max: {max_price}€")
+    await update.message.reply_text(
+        f"✅ Aggiunto:\n<b>{data['title']}</b>\n💶 Prezzo max: {max_price}€",
+        parse_mode="HTML"
+    )
 
 # =====================
 # Rimuovi prodotto
@@ -92,23 +107,23 @@ async def list_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not products:
         await update.message.reply_text("Nessun prodotto monitorato.")
         return
-    msg = "📋 Prodotti monitorati:\n"
+    msg = "📋 <b>Prodotti monitorati:</b>\n\n"
     for url, data in products.items():
-        msg += f"- {data['title']} (max {data['max_price']}€)\n"
-    await update.message.reply_text(msg)
+        msg += f"🔗 {data['title']}\n💶 max {data['max_price']}€\n{url}\n\n"
+    await update.message.reply_text(msg, parse_mode="HTML")
 
 # =====================
 # Comandi disponibili
 # =====================
 async def commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "🤖 Comandi disponibili:\n\n"
+        "🤖 <b>Comandi disponibili</b>\n\n"
         "/add <url> <prezzo> → aggiungi prodotto\n"
         "/remove <url> → rimuovi prodotto\n"
         "/list → lista prodotti monitorati\n"
         "/commands → mostra questo messaggio"
     )
-    await update.message.reply_text(msg)
+    await update.message.reply_text(msg, parse_mode="HTML")
 
 # =====================
 # Check prezzi periodici
@@ -123,15 +138,15 @@ async def check_prices(context: ContextTypes.DEFAULT_TYPE):
             text = (
                 f"🔥 <b>RESTOCK!</b>\n\n"
                 f"{scraped['title']}\n"
-                f"💶 Prezzo: {scraped['price']}€\n"
+                f"💶 Prezzo: <b>{scraped['price']}€</b>\n"
                 f"🏬 Venduto da: Amazon\n\n"
                 f"🔗 Per acquistare durante un Restock:\n"
-                f"⬇️ Clicca sui pulsanti Acquisto Lampo (x1 o x2) qui sotto"
+                f"⬇️ Clicca sui pulsanti qui sotto 👇"
             )
 
             keyboard = [
-                [InlineKeyboardButton("x1 Acquisto ⚡", url=f"{url}?quantity=1&buy-now=1")],
-                [InlineKeyboardButton("x2 Acquisto ⚡", url=f"{url}?quantity=2&buy-now=1")]
+                [InlineKeyboardButton("⚡ x1 Acquisto", url=f"{url}?quantity=1&buy-now=1")],
+                [InlineKeyboardButton("⚡ x2 Acquisto", url=f"{url}?quantity=2&buy-now=1")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -157,6 +172,7 @@ def main():
     app.add_handler(CommandHandler("list", list_products))
     app.add_handler(CommandHandler("commands", commands))
 
+    # Controlla prezzi ogni 5 secondi
     app.job_queue.run_repeating(check_prices, interval=5, first=5)
 
     app.run_polling()
