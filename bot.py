@@ -141,41 +141,11 @@ async def price_checker(context: ContextTypes.DEFAULT_TYPE):
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            # Messaggio elegante
-            text = (
-                "🔥 <b>RESTOCK DISPONIBILE!</b> 🔥\n\n"
-                f"📦 <b>Prodotto:</b>\n<a href='{p['url']}'>Link prodotto Amazon</a>\n\n"
-                f"💰 <b>Prezzo attuale:</b> {price}€\n"
-                f"🎯 <b>Prezzo target:</b> {p['target']}€\n\n"
-                "🏪 <b>Venduto da:</b> Amazon\n\n"
-                "👇 <b>Acquista subito con un click:</b>"
+            await context.bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=f"🔥 RESTOCK sotto {p['target']}€!\n\nLink: {p['url']}\nPrezzo attuale: {price}€",
+                reply_markup=reply_markup
             )
-
-            # Prova a prendere immagine prodotto da Amazon
-            try:
-                headers = {"User-Agent": "Mozilla/5.0"}
-                r = requests.get(p["url"], headers=headers, timeout=10)
-                soup = BeautifulSoup(r.text, "html.parser")
-                img_tag = soup.find("img", {"id": "landingImage"})
-                img_url = img_tag["src"] if img_tag else None
-            except:
-                img_url = None
-
-            if img_url:
-                await context.bot.send_photo(
-                    chat_id=CHANNEL_ID,
-                    photo=img_url,
-                    caption=text,
-                    reply_markup=reply_markup,
-                    parse_mode="HTML"
-                )
-            else:
-                await context.bot.send_message(
-                    chat_id=CHANNEL_ID,
-                    text=text,
-                    reply_markup=reply_markup,
-                    parse_mode="HTML"
-                )
 
 
 # --- MAIN ---
