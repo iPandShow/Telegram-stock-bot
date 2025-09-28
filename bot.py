@@ -36,8 +36,8 @@ def save_products(products):
 
 
 # --- FUNZIONI AMAZON ---
-def get_price_and_stock(url):
-    """Ritorna (disponibile, prezzo) da una pagina Amazon (molto base, può fallire)"""
+def get_product_info(url):
+    """Ritorna (disponibile, prezzo, titolo, immagine) da una pagina Amazon (molto base)."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     }
@@ -45,17 +45,24 @@ def get_price_and_stock(url):
         r = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(r.text, "html.parser")
 
-        # Trova prezzo
+        # Titolo
+        title_tag = soup.find("span", {"id": "productTitle"})
+        title = title_tag.get_text(strip=True) if title_tag else "Prodotto sconosciuto"
+
+        # Prezzo
         price_tag = soup.find("span", {"class": "a-price-whole"})
         if not price_tag:
-            return False, None
+            return False, None, title, None
         price = int(price_tag.get_text().replace(".", "").replace(",", "").strip())
 
-        # Disponibilità (se esiste prezzo, assumiamo disponibile)
-        return True, price
+        # Immagine
+        img_tag = soup.find("img", {"id": "landingImage"})
+        image = img_tag["src"] if img_tag else None
+
+        return True, price, title, image
     except Exception as e:
         logger.error(f"Errore scraping {url}: {e}")
-        return False, None
+        return False, None, "Errore", None
 
 
 # --- COMANDI TELEGRAM ---
@@ -131,21 +138,39 @@ async def price_checker(context: ContextTypes.DEFAULT_TYPE):
         return
 
     for p in products:
-        available, price = get_price_and_stock(p["url"])
+        available, price, title, image = get_product_info(p["url"])
         if available and price is not None and price <= p["target"]:
+            text = (
+                f"🔥 <b>RESTOCK!</b>\n\n"
+                f"<b>{title}</b>\n\n"
+                f"💶 Prezzo attuale: <b>{price}€</b>\n"
+                f"🎯 Prezzo target: {p['target']}€\n"
+                f"🏬 Venduto da: Amazon\n\n"
+                f"🔗 Per acquistare durante un restock:\n"
+                f"⬇️ Clicca sui pulsanti Acquisto Lampo (x1 o x2) qui sotto"
+            )
+
             keyboard = [
-                [
-                    InlineKeyboardButton("x1 Acquisto ⚡", url=f"{p['url']}?quantity=1"),
-                    InlineKeyboardButton("x2 Acquisto ⚡", url=f"{p['url']}?quantity=2"),
-                ]
+                [InlineKeyboardButton("x1 Acquisto ⚡", url=f"{p['url']}?quantity=1&buy-now=1")],
+                [InlineKeyboardButton("x2 Acquisto ⚡", url=f"{p['url']}?quantity=2&buy-now=1")],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            await context.bot.send_message(
-                chat_id=CHANNEL_ID,
-                text=f"🔥 RESTOCK sotto {p['target']}€!\n\nLink: {p['url']}\nPrezzo attuale: {price}€",
-                reply_markup=reply_markup
-            )
+            if image:
+                await context.bot.send_photo(
+                    chat_id=CHANNEL_ID,
+                    photo=image,
+                    caption=text,
+                    parse_mode="HTML",
+                    reply_markup=reply_markup
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=CHANNEL_ID,
+                    text=text,
+                    parse_mode="HTML",
+                    reply_markup=reply_markup
+                )
 
 
 # --- MAIN ---
