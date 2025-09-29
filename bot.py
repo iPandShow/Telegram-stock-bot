@@ -6,20 +6,20 @@ from bs4 import BeautifulSoup
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-# Logging
+# --- LOGGING ---
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Token e Chat ID dal Railway
+# --- TOKEN E CHAT ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@pokemonmonitorpanda")
 
 # Link collegati
-CHAT_LINK = "https://t.me/pokemonmonitorpandachat"
-INVITE_LINK = "https://t.me/+c9yMOU4D-lVlZjM0"  # link invito corretto ✅
+CHAT_LINK = "https://t.me/pokemonmonitorpandachat"   # Chat ufficiale
+INVITE_LINK = "https://t.me/+c9yMOU4D-lVlZjM0"      # Link invito al canale
 
 PRODUCTS_FILE = "products.json"
 
@@ -39,7 +39,7 @@ def save_products(products):
 
 # --- FUNZIONI AMAZON ---
 def get_price_asin_offering(url):
-    """Estrae prezzo, asin e offeringID se disponibile"""
+    """Estrae prezzo, ASIN e offeringID da un link Amazon"""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
         r = requests.get(url, headers=headers, timeout=10)
@@ -86,7 +86,7 @@ def get_price_asin_offering(url):
 
 
 def build_checkout_links(asin, offeringID, tag="romoloepicc00-21"):
-    """Costruisce i due link checkout rapidi"""
+    """Crea i link checkout rapidi per 1x e 2x"""
     base = "https://www.amazon.it/gp/checkoutportal/enter-checkout.html/ref=dp_mw_buy_now"
     return [
         f"{base}?asin={asin}&offeringID={offeringID}&buyNow=1&quantity=1&tag={tag}",
@@ -96,16 +96,17 @@ def build_checkout_links(asin, offeringID, tag="romoloepicc00-21"):
 
 # --- COMANDI TELEGRAM ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Ciao! Usa /help per vedere i comandi disponibili.")
+    await update.message.reply_text("👋 Benvenuto su *PokémonMonitorPanda*! 🐼\nUsa /help per vedere i comandi.", parse_mode="Markdown")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "📋 Comandi disponibili:\n"
-        "/add <link> <prezzo> - Aggiungi un prodotto\n"
-        "/list - Mostra prodotti salvati\n"
-        "/remove <id> - Elimina prodotto\n"
-        "/test <id> - Forza pubblicazione nel canale"
+        "📋 *Comandi disponibili:*\n"
+        "/add <link> <prezzo> ➝ Aggiungi un prodotto\n"
+        "/list ➝ Mostra i prodotti salvati\n"
+        "/remove <id> ➝ Elimina un prodotto\n"
+        "/test <id> ➝ Forza la pubblicazione nel canale",
+        parse_mode="Markdown"
     )
 
 
@@ -133,7 +134,8 @@ async def add_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_products(products)
 
     await update.message.reply_text(
-        f"✅ Prodotto aggiunto!\n{url}\n🎯 Target: {target_price}€\n"
+        f"✅ Prodotto aggiunto a PokémonMonitorPanda 🐼!\n\n"
+        f"🔗 {url}\n🎯 Target: {target_price}€\n"
         f"ASIN: {asin}\nOfferingID: {offeringID if offeringID else '❌ non trovato'}"
     )
 
@@ -141,13 +143,13 @@ async def add_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def list_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
     products = load_products()
     if not products:
-        await update.message.reply_text("📦 Nessun prodotto salvato.")
+        await update.message.reply_text("📦 Nessun prodotto salvato 🐼.")
         return
 
-    msg = "📋 Prodotti monitorati:\n\n"
+    msg = "📋 *Prodotti monitorati da Panda:*\n\n"
     for i, p in enumerate(products, start=1):
         msg += f"{i}. {p['url']} → 🎯 {p['target']}€\n"
-    await update.message.reply_text(msg)
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def remove_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -168,14 +170,16 @@ async def remove_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     removed = products.pop(idx)
     save_products(products)
-    await update.message.reply_text(f"✅ Prodotto rimosso:\n{removed['url']}")
+    await update.message.reply_text(f"✅ Prodotto rimosso da Panda:\n{removed['url']}")
 
 
+# --- MESSAGGIO AL CANALE ---
 async def send_to_channel(p, test=False, price=None):
     asin = p.get("asin")
     offeringID = p.get("offeringID")
     buttons = []
 
+    # Pulsanti acquisto rapido
     if asin and offeringID:
         links = build_checkout_links(asin, offeringID)
         buttons.append([
@@ -185,16 +189,26 @@ async def send_to_channel(p, test=False, price=None):
     else:
         buttons.append([InlineKeyboardButton("🔗 Vai al prodotto", url=p["url"])])
 
+    # Pulsanti community
+    buttons.append([
+        InlineKeyboardButton("💬 Unisciti alla chat PandaFamily", url=CHAT_LINK),
+        InlineKeyboardButton("👥 Invita amici al canale", url=INVITE_LINK)
+    ])
+
     reply_markup = InlineKeyboardMarkup(buttons)
 
-    text = "🔥 **RESTOCK TROVATO!** 🔥\n\n" if not test else "🛠 **TEST RESTOCK**\n\n"
+    # --- Testo brandizzato ---
+    text = "🐼✨ *PANDA ALERT* ✨🐼\n\n"
+    text += "🔥 *Restock trovato su Amazon!* 🔥\n\n" if not test else "🛠 *TEST RESTOCK (Panda)* 🛠\n\n"
     text += f"📦 *Prodotto:* [Link Amazon]({p['url']})\n"
     text += f"🎯 *Prezzo target:* {p['target']}€\n"
     if price:
         text += f"💶 *Prezzo attuale:* {price}€\n\n"
 
-    text += "🛒 *Per acquistare durante il restock clicca i pulsanti qui sotto!*\n\n"
-    text += f"💬 [Unisciti alla chat]({CHAT_LINK}) | 👥 [Invita i tuoi amici al canale]({INVITE_LINK})"
+    text += "⚡ *Acquista subito con i pulsanti qui sotto per non perdere il drop!*\n\n"
+    text += "────────────────────\n"
+    text += "🐼 Powered by *PokémonMonitorPanda*\n"
+    text += "────────────────────"
 
     return text, reply_markup
 
@@ -218,6 +232,7 @@ async def test_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     p = products[idx]
     text, reply_markup = await send_to_channel(p, test=True)
 
+    # Invio SOLO al canale, non in chat privata
     await context.bot.send_message(chat_id=CHANNEL_ID, text=text, reply_markup=reply_markup, parse_mode="Markdown")
     await update.message.reply_text("✅ Messaggio test inviato al canale!")
 
