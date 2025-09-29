@@ -19,7 +19,7 @@ CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@pokemonmonitorpanda")
 
 # Link collegati
 CHAT_LINK = "https://t.me/pokemonmonitorpandachat"
-INVITE_LINK = "https://t.me/pokemonmonitorpanda"
+INVITE_LINK = "https://t.me/c9yMOU4D-IVjM0"  # link invito corretto
 
 PRODUCTS_FILE = "products.json"
 
@@ -194,7 +194,7 @@ async def send_to_channel(p, test=False, price=None):
         text += f"💶 *Prezzo attuale:* {price}€\n\n"
 
     text += "🛒 *Per acquistare durante il restock clicca i pulsanti qui sotto!*\n\n"
-    text += f"💬 [Unisciti alla chat]({CHAT_LINK}) | 👥 [Invita amici]({INVITE_LINK})"
+    text += f"💬 [Unisciti alla chat]({CHAT_LINK}) | 👥 [Invita i tuoi amici al canale]({INVITE_LINK})"
 
     return text, reply_markup
 
