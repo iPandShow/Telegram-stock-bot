@@ -36,8 +36,8 @@ def save_products(products):
 
 
 # --- FUNZIONI AMAZON ---
-def get_price_and_stock(url):
-    """Prova a estrarre il prezzo da una pagina Amazon"""
+def get_product_info(url):
+    """Estrae titolo, prezzo e immagine da una pagina Amazon"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     }
@@ -45,42 +45,53 @@ def get_price_and_stock(url):
         r = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(r.text, "html.parser")
 
+        # Titolo
+        title = soup.find("span", {"id": "productTitle"})
+        title = title.get_text(strip=True) if title else "Prodotto Amazon"
+
+        # Prezzo
         price = None
         selectors = [
             ("span", {"class": "a-price-whole"}),
             ("span", {"class": "a-offscreen"}),
-            ("span", {"data-a-size": "l"}),
-            ("span", {"data-a-color": "price"})
         ]
-
         for tag, attrs in selectors:
             el = soup.find(tag, attrs=attrs)
             if el:
-                price_text = el.get_text().replace("€", "").replace(".", "").replace(",", "").strip()
+                price_text = el.get_text().replace("€", "").replace(".", "").replace(",", ".").strip()
                 try:
                     price = int(float(price_text))
                     break
                 except ValueError:
                     continue
 
-        if price is None:
-            logger.warning(f"Prezzo non trovato per {url}")
-            return False, None
+        # Immagine
+        img = None
+        img_tag = soup.find("img", {"id": "landingImage"})
+        if img_tag and img_tag.get("src"):
+            img = img_tag["src"]
 
-        return True, price
+        return title, price, img
     except Exception as e:
         logger.error(f"Errore scraping {url}: {e}")
-        return False, None
+        return None, None, None
 
 
 def build_checkout_links(asin, tag="romoloepicc00-21"):
-    """Costruisce i due link checkout (x1 e x2)"""
-    base = "https://www.amazon.it/gp/checkoutportal/enter-checkout.html"
-    offering_id = "example-offer-id"  # placeholder: servirebbe scraping del vero offeringID
+    """Costruisce link checkout alternativi senza offeringID"""
     return [
-        f"{base}?asin={asin}&offeringID={offering_id}&buyNow=1&quantity=1&tag={tag}",
-        f"{base}?asin={asin}&offeringID={offering_id}&buyNow=1&quantity=2&tag={tag}",
+        f"https://www.amazon.it/dp/{asin}?tag={tag}&quantity=1",
+        f"https://www.amazon.it/dp/{asin}?tag={tag}&quantity=2",
     ]
+
+
+def extract_asin(url: str):
+    """Estrae ASIN da link Amazon"""
+    if "/dp/" in url:
+        return url.split("/dp/")[1].split("/")[0]
+    if "/d/" in url:
+        return url.split("/d/")[1].split("?")[0]
+    return None
 
 
 # --- COMANDI TELEGRAM ---
@@ -150,6 +161,48 @@ async def remove_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Prodotto rimosso:\n{removed['url']}")
 
 
+async def send_product_message(bot, product, price, img_url):
+    """Invia il messaggio al canale con immagine e bottoni"""
+    asin = extract_asin(product["url"])
+    if not asin:
+        return
+
+    links = build_checkout_links(asin)
+    keyboard = [
+        [InlineKeyboardButton("x1 Acquisto ⚡", url=links[0]),
+         InlineKeyboardButton("x2 Acquisto ⚡", url=links[1])]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    caption = (
+        f"🔥 RESTOCK disponibile!\n\n"
+        f"📌 <b>{product['url']}</b>\n\n"
+        f"💶 Prezzo attuale: <b>{price}€</b>\n"
+        f"🎯 Prezzo target: <b>{product['target']}€</b>\n"
+        f"🏬 Venduto da: Amazon\n\n"
+        f"➡️ Clicca sui pulsanti per acquisto lampo!"
+    )
+
+    try:
+        if img_url:
+            await bot.send_photo(
+                chat_id=CHANNEL_ID,
+                photo=img_url,
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=reply_markup
+            )
+        else:
+            await bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=caption,
+                parse_mode="HTML",
+                reply_markup=reply_markup
+            )
+    except Exception as e:
+        logger.error(f"Errore invio messaggio: {e}")
+
+
 async def test_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Forza la pubblicazione su canale"""
     if not context.args:
@@ -168,31 +221,8 @@ async def test_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     p = products[idx]
-
-    # Estrai ASIN
-    asin = None
-    if "/dp/" in p["url"]:
-        asin = p["url"].split("/dp/")[1].split("/")[0]
-    elif "/d/" in p["url"]:
-        asin = p["url"].split("/d/")[1].split("?")[0]
-
-    if not asin:
-        await update.message.reply_text("❌ ASIN non trovato per generare i link checkout.")
-        return
-
-    links = build_checkout_links(asin)
-
-    keyboard = [
-        [InlineKeyboardButton("x1 Acquisto ⚡", url=links[0]),
-         InlineKeyboardButton("x2 Acquisto ⚡", url=links[1])]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await context.bot.send_message(
-        chat_id=CHANNEL_ID,
-        text=f"🔥 RESTOCK TEST!\n\n{p['url']}\n🎯 Target: {p['target']}€",
-        reply_markup=reply_markup
-    )
+    title, price, img = get_product_info(p["url"])
+    await send_product_message(context.bot, p, price or 0, img)
     await update.message.reply_text("✅ Messaggio test inviato al canale!")
 
 
@@ -203,29 +233,9 @@ async def price_checker(context: ContextTypes.DEFAULT_TYPE):
         return
 
     for p in products:
-        available, price = get_price_and_stock(p["url"])
-        if available and price is not None and price <= p["target"]:
-            asin = None
-            if "/dp/" in p["url"]:
-                asin = p["url"].split("/dp/")[1].split("/")[0]
-            elif "/d/" in p["url"]:
-                asin = p["url"].split("/d/")[1].split("?")[0]
-
-            if not asin:
-                continue
-
-            links = build_checkout_links(asin)
-            keyboard = [
-                [InlineKeyboardButton("x1 Acquisto ⚡", url=links[0]),
-                 InlineKeyboardButton("x2 Acquisto ⚡", url=links[1])]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            await context.bot.send_message(
-                chat_id=CHANNEL_ID,
-                text=f"🔥 RESTOCK sotto {p['target']}€!\n\nLink: {p['url']}\n💶 Prezzo attuale: {price}€",
-                reply_markup=reply_markup
-            )
+        title, price, img = get_product_info(p["url"])
+        if price is not None and price <= p["target"]:
+            await send_product_message(context.bot, p, price, img)
 
 
 # --- MAIN ---
@@ -240,9 +250,9 @@ def main():
     application.add_handler(CommandHandler("remove", remove_product))
     application.add_handler(CommandHandler("test", test_product))
 
-    # Job queue ogni 60 secondi
+    # Job queue ogni 5 secondi
     job_queue = application.job_queue
-    job_queue.run_repeating(price_checker, interval=60, first=10)
+    job_queue.run_repeating(price_checker, interval=5, first=5)
 
     application.run_polling()
 
