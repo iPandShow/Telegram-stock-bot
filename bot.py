@@ -19,7 +19,7 @@ CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@pokemonmonitorpanda")
 
 # Link collegati
 CHAT_LINK = "https://t.me/pokemonmonitorpandachat"
-INVITE_LINK = "https://t.me/c9yMOU4D-IVjM0"  # link invito corretto
+INVITE_LINK = "https://t.me/+c9yMOU4D-lVlZjM0"  # link invito corretto ✅
 
 PRODUCTS_FILE = "products.json"
 
