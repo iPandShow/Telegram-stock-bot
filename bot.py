@@ -15,9 +15,13 @@ logger = logging.getLogger(__name__)
 
 # Token e ID canale dal Railway
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@pokemonmonitorpanda")
 
-# Link collegati
+# ⚠️ IMPORTANTE: qui devi mettere l’ID numerico del canale,
+# NON il gruppo e NON lo username.
+# Per ottenerlo: aggiungi il bot @userinfobot al tuo canale e leggi l’ID
+CHANNEL_ID = int(os.getenv("TELEGRAM_CHANNEL_ID", "-100xxxxxxxxxxxx"))
+
+# Link chat testuale
 CHAT_LINK = "https://t.me/pokemonmonitorpandachat"
 
 PRODUCTS_FILE = "products.json"
@@ -185,9 +189,10 @@ async def send_to_channel(p, test=False, price=None):
     else:
         buttons.append([InlineKeyboardButton("🔗 Vai al prodotto", url=p["url"])])
 
-    # Pulsante invito amici (inoltro del canale)
+    # Pulsante invito amici (link share Telegram)
+    share_url = "https://t.me/share/url?url=https://t.me/pokemonmonitorpanda&text=🔥 Unisciti a Pokémon Monitor Panda 🔥"
     buttons.append([
-        InlineKeyboardButton("👥 Invita amici", switch_inline_query="Unisciti a @pokemonmonitorpanda 🔥")
+        InlineKeyboardButton("👥 Invita amici", url=share_url)
     ])
     reply_markup = InlineKeyboardMarkup(buttons)
 
