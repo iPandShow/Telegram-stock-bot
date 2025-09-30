@@ -1,4 +1,3 @@
-
 import os
 import json
 import logging
@@ -14,13 +13,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Token e Chat ID dal Railway
+# Token e ID canale dal Railway
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@pokemonmonitorpanda")
 
 # Link collegati
-CHAT_LINK = "https://t.me/pokemonmonitorpandachat"   # link testuale
-INVITE_LINK = "https://t.me/+c9yMOU4D-lVlZjM0"       # pulsante invito
+CHAT_LINK = "https://t.me/pokemonmonitorpandachat"
 
 PRODUCTS_FILE = "products.json"
 
@@ -187,19 +185,20 @@ async def send_to_channel(p, test=False, price=None):
     else:
         buttons.append([InlineKeyboardButton("🔗 Vai al prodotto", url=p["url"])])
 
-    # Pulsante invito amici
-    buttons.append([InlineKeyboardButton("👥 Invita amici", url=INVITE_LINK)])
+    # Pulsante invito amici (inoltro del canale)
+    buttons.append([
+        InlineKeyboardButton("👥 Invita amici", switch_inline_query="Unisciti a @pokemonmonitorpanda 🔥")
+    ])
     reply_markup = InlineKeyboardMarkup(buttons)
 
-    # Testo principale
-    text = "🐼 *Pokémon Monitor Panda* 🐼\n\n"
-    text += "🔥 RESTOCK TROVATO! 🔥\n\n" if not test else "🛠 TEST RESTOCK 🛠\n\n"
+    text = "🐼 **Pokémon Monitor Panda** 🐼\n\n"
+    text += "🔥 **RESTOCK TROVATO!** 🔥\n\n" if not test else "🛠 **TEST RESTOCK**\n\n"
     text += f"📦 *Prodotto:* [Link Amazon]({p['url']})\n"
     text += f"🎯 *Prezzo target:* {p['target']}€\n"
     if price:
         text += f"💶 *Prezzo attuale:* {price}€\n\n"
 
-    text += "🛒 Per acquistare durante il restock clicca i pulsanti qui sotto!\n\n"
+    text += "🛒 *Per acquistare durante il restock clicca i pulsanti qui sotto!*\n\n"
     text += f"💬 [Unisciti alla chat]({CHAT_LINK})"
 
     return text, reply_markup
@@ -224,7 +223,7 @@ async def test_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     p = products[idx]
     text, reply_markup = await send_to_channel(p, test=True)
 
-    # Invia solo nel canale
+    # ✅ invia SOLO nel canale
     await context.bot.send_message(chat_id=CHANNEL_ID, text=text, reply_markup=reply_markup, parse_mode="Markdown")
     await update.message.reply_text("✅ Messaggio test inviato al canale!")
 
@@ -248,6 +247,7 @@ async def price_checker(context: ContextTypes.DEFAULT_TYPE):
             save_products(products)
 
             text, reply_markup = await send_to_channel(p, price=price)
+            # ✅ invia SOLO nel canale
             await context.bot.send_message(chat_id=CHANNEL_ID, text=text, reply_markup=reply_markup, parse_mode="Markdown")
 
 
