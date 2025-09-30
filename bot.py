@@ -13,13 +13,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- TOKEN E CHAT ---
+# --- TOKEN E CANALE ---
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@pokemonmonitorpanda")
+
+# IMPORTANTE: imposta questo valore con l’ID numerico del tuo canale
+# Per esempio: -1001234567890
+CHANNEL_ID = int(os.getenv("TELEGRAM_CHANNEL_ID"))
 
 # Link collegati
 CHAT_LINK = "https://t.me/pokemonmonitorpandachat"   # Chat ufficiale
-INVITE_LINK = "https://t.me/+c9yMOU4D-lVlZjM0"      # Link invito al canale
+INVITE_LINK = "https://t.me/+c9yMOU4D-lVlZjM0"      # Link invito diretto al canale
 
 PRODUCTS_FILE = "products.json"
 
@@ -96,7 +99,10 @@ def build_checkout_links(asin, offeringID, tag="romoloepicc00-21"):
 
 # --- COMANDI TELEGRAM ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Benvenuto su *PokémonMonitorPanda*! 🐼\nUsa /help per vedere i comandi.", parse_mode="Markdown")
+    await update.message.reply_text(
+        "👋 Benvenuto su *PokémonMonitorPanda*! 🐼\nUsa /help per vedere i comandi.",
+        parse_mode="Markdown"
+    )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
