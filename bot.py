@@ -16,12 +16,10 @@ logger = logging.getLogger(__name__)
 # Token e ID canale dal Railway
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# ⚠️ IMPORTANTE: qui devi mettere l’ID numerico del canale,
-# NON il gruppo e NON lo username.
-# Per ottenerlo: aggiungi il bot @userinfobot al tuo canale e leggi l’ID
+# ⚠️ IMPORTANTE: ID numerico del canale (es. -100123456789)
 CHANNEL_ID = int(os.getenv("TELEGRAM_CHANNEL_ID", "-100xxxxxxxxxxxx"))
 
-# Link chat testuale
+# Link alla chat testuale
 CHAT_LINK = "https://t.me/pokemonmonitorpandachat"
 
 PRODUCTS_FILE = "products.json"
@@ -42,7 +40,7 @@ def save_products(products):
 
 # --- FUNZIONI AMAZON ---
 def get_price_asin_offering(url):
-    """Estrae prezzo, asin e offeringID se disponibile"""
+    """Estrae prezzo, asin e offeringID se disponibili"""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
         r = requests.get(url, headers=headers, timeout=10)
@@ -99,7 +97,7 @@ def build_checkout_links(asin, offeringID, tag="romoloepicc00-21"):
 
 # --- COMANDI TELEGRAM ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Ciao! Usa /help per vedere i comandi disponibili.")
+    await update.message.reply_text("👋 Benvenuto su Pokémon Monitor Panda 🐼!\nUsa /help per scoprire i comandi.")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -107,7 +105,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📋 Comandi disponibili:\n"
         "/add <link> <prezzo> - Aggiungi un prodotto\n"
         "/list - Mostra prodotti salvati\n"
-        "/remove <id> - Elimina prodotto\n"
+        "/remove <id> - Elimina un prodotto\n"
         "/test <id> - Forza pubblicazione nel canale"
     )
 
@@ -189,22 +187,24 @@ async def send_to_channel(p, test=False, price=None):
     else:
         buttons.append([InlineKeyboardButton("🔗 Vai al prodotto", url=p["url"])])
 
-    # Pulsante invito amici (link share Telegram)
-    share_url = "https://t.me/share/url?url=https://t.me/pokemonmonitorpanda&text=🔥 Unisciti a Pokémon Monitor Panda 🔥"
+    # Pulsante invito amici (inoltro diretto)
+    share_url = "https://t.me/share/url?url=https://t.me/pokemonmonitorpanda&text=🔥 Unisciti a Pokémon Monitor Panda 🐼"
     buttons.append([
         InlineKeyboardButton("👥 Invita amici", url=share_url)
     ])
+
     reply_markup = InlineKeyboardMarkup(buttons)
 
-    text = "🐼 **Pokémon Monitor Panda** 🐼\n\n"
-    text += "🔥 **RESTOCK TROVATO!** 🔥\n\n" if not test else "🛠 **TEST RESTOCK**\n\n"
-    text += f"📦 *Prodotto:* [Link Amazon]({p['url']})\n"
-    text += f"🎯 *Prezzo target:* {p['target']}€\n"
+    # Testo messaggio
+    text = "🐼 <b>Pokémon Monitor Panda</b> 🐼\n\n"
+    text += "🔥 <b>RESTOCK TROVATO!</b> 🔥\n\n" if not test else "🛠 <b>TEST RESTOCK</b>\n\n"
+    text += f"📦 <b>Prodotto:</b> <a href=\"{p['url']}\">Link Amazon</a>\n"
+    text += f"🎯 <b>Prezzo target:</b> {p['target']}€\n"
     if price:
-        text += f"💶 *Prezzo attuale:* {price}€\n\n"
+        text += f"💶 <b>Prezzo attuale:</b> {price}€\n\n"
 
-    text += "🛒 *Per acquistare durante il restock clicca i pulsanti qui sotto!*\n\n"
-    text += f"💬 [Unisciti alla chat]({CHAT_LINK})"
+    text += "🛒 <i>Per acquistare clicca i pulsanti qui sotto!</i>\n\n"
+    text += f"💬 <a href=\"{CHAT_LINK}\">Unisciti alla chat</a>"
 
     return text, reply_markup
 
@@ -228,8 +228,8 @@ async def test_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     p = products[idx]
     text, reply_markup = await send_to_channel(p, test=True)
 
-    # ✅ invia SOLO nel canale
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=text, reply_markup=reply_markup, parse_mode="Markdown")
+    # ✅ Invia SOLO nel canale
+    await context.bot.send_message(chat_id=CHANNEL_ID, text=text, reply_markup=reply_markup, parse_mode="HTML")
     await update.message.reply_text("✅ Messaggio test inviato al canale!")
 
 
@@ -252,8 +252,8 @@ async def price_checker(context: ContextTypes.DEFAULT_TYPE):
             save_products(products)
 
             text, reply_markup = await send_to_channel(p, price=price)
-            # ✅ invia SOLO nel canale
-            await context.bot.send_message(chat_id=CHANNEL_ID, text=text, reply_markup=reply_markup, parse_mode="Markdown")
+            # ✅ Invia SOLO nel canale
+            await context.bot.send_message(chat_id=CHANNEL_ID, text=text, reply_markup=reply_markup, parse_mode="HTML")
 
 
 # --- MAIN ---
