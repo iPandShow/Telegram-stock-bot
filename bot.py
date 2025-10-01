@@ -1,383 +1,274 @@
-# bot.py
 import os
 import json
 import logging
-import re
 import requests
-from urllib.parse import quote_plus
+import random
+import asyncio
 from bs4 import BeautifulSoup
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Logging
-# ──────────────────────────────────────────────────────────────────────────────
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
+    level=logging.INFO
 )
-logger = logging.getLogger("panda-bot")
+logger = logging.getLogger(__name__)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Config (SOLO TOKEN in env)
-# ──────────────────────────────────────────────────────────────────────────────
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # <-- unica variabile richiesta
+# Variabile del bot (Railway)
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# Username del canale (il bot invierà SOLO qui)
-CHANNEL_USERNAME = "pokemonmonitorpanda"
-CHANNEL_ID = None  # risolto a runtime
+# Canale principale
+CHANNEL_ID = "@pokemonmonitorpanda"
 
-# Link testuale alla chat
+# Link chat testuale
 CHAT_LINK = "https://t.me/pokemonmonitorpandachat"
 
-# File prodotti
 PRODUCTS_FILE = "products.json"
 
-# Immagine di fallback
-PLACEHOLDER_IMG = "https://i.imgur.com/8fKQZt6.png"
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Utilità: storage
-# ──────────────────────────────────────────────────────────────────────────────
+# --- GESTIONE FILE JSON ---
 def load_products():
     if not os.path.exists(PRODUCTS_FILE):
         return []
-    try:
-        with open(PRODUCTS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
+    with open(PRODUCTS_FILE, "r") as f:
+        return json.load(f)
 
 
 def save_products(products):
-    with open(PRODUCTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(products, f, indent=2, ensure_ascii=False)
+    with open(PRODUCTS_FILE, "w") as f:
+        json.dump(products, f, indent=4)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Scraping Amazon (best effort, senza login)
-# ──────────────────────────────────────────────────────────────────────────────
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0 Safari/537.36"
-    )
-}
-
-
-def extract_asin(url: str) -> str | None:
-    if "/dp/" in url:
-        return url.split("/dp/")[1].split("/")[0].split("?")[0]
-    if "/d/" in url:
-        return url.split("/d/")[1].split("/")[0].split("?")[0]
-    m = re.search(r"[?&]asin=([A-Z0-9]{10})", url)
-    return m.group(1) if m else None
-
-
-def scrape_amazon(url: str) -> dict:
-    """Ritorna dict: title, price (float|None), image, asin, offeringID."""
-    data = {"title": None, "price": None, "image": PLACEHOLDER_IMG, "asin": extract_asin(url), "offeringID": None}
+# --- FUNZIONI AMAZON ---
+def get_price_asin_offering(url):
+    """Estrae prezzo, asin e offeringID se disponibile"""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
-        r = requests.get(url, headers=HEADERS, timeout=12)
-        r.raise_for_status()
-        html = r.text
-        soup = BeautifulSoup(html, "html.parser")
-
-        # Titolo
-        title = soup.find("span", {"id": "productTitle"})
-        if not title:
-            ogt = soup.find("meta", {"property": "og:title"})
-            title = ogt["content"] if ogt and ogt.get("content") else None
-        else:
-            title = title.get_text(strip=True)
-        if title:
-            data["title"] = title
+        r = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(r.text, "html.parser")
 
         # Prezzo
-        candidates = [
+        price = None
+        selectors = [
             ("span", {"class": "a-price-whole"}),
             ("span", {"class": "a-offscreen"}),
             ("span", {"data-a-size": "l"}),
-            ("span", {"data-a-color": "price"}),
+            ("span", {"data-a-color": "price"})
         ]
-        for tag, attrs in candidates:
+        for tag, attrs in selectors:
             el = soup.find(tag, attrs=attrs)
             if el:
-                txt = el.get_text().replace("€", "").replace(".", "").replace(",", ".").strip()
+                price_text = el.get_text().replace("€", "").replace(".", "").replace(",", ".").strip()
                 try:
-                    price = float(txt)
-                    data["price"] = price
+                    price = float(price_text)
                     break
-                except Exception:
-                    pass
+                except ValueError:
+                    continue
 
-        # Immagine
-        img = soup.find("img", {"id": "landingImage"})
-        if not img:
-            ogimg = soup.find("meta", {"property": "og:image"})
-            if ogimg and ogimg.get("content"):
-                data["image"] = ogimg["content"]
-        else:
-            data["image"] = img.get("src", PLACEHOLDER_IMG)
+        # ASIN
+        asin = None
+        if "/dp/" in url:
+            asin = url.split("/dp/")[1].split("/")[0]
+        elif "/d/" in url:
+            asin = url.split("/d/")[1].split("?")[0]
 
-        # offeringID (se visibile in pagina)
-        m = re.search(r"offeringID=([A-Za-z0-9%]+)", html)
-        if m:
-            data["offeringID"] = m.group(1)
+        # offeringID
+        offeringID = None
+        html = r.text
+        if "offeringID" in html:
+            import re
+            match = re.search(r"offeringID=([A-Za-z0-9%]+)", html)
+            if match:
+                offeringID = match.group(1)
 
+        return price, asin, offeringID
     except Exception as e:
-        logger.warning(f"Scraping fallito: {e}")
+        logger.error(f"Errore scraping {url}: {e}")
+        return None, None, None
 
-    return data
 
-
-def build_checkout_links(asin: str, offering_id: str, tag: str = "romoloepicc00-21") -> tuple[str, str]:
+def build_checkout_links(asin, offeringID, tag="romoloepicc00-21"):
+    """Costruisce i due link checkout rapidi"""
     base = "https://www.amazon.it/gp/checkoutportal/enter-checkout.html/ref=dp_mw_buy_now"
-    x1 = f"{base}?asin={asin}&offeringID={offering_id}&buyNow=1&quantity=1&tag={tag}"
-    x2 = f"{base}?asin={asin}&offeringID={offering_id}&buyNow=1&quantity=2&tag={tag}"
-    return x1, x2
+    return [
+        f"{base}?asin={asin}&offeringID={offeringID}&buyNow=1&quantity=1&tag={tag}",
+        f"{base}?asin={asin}&offeringID={offeringID}&buyNow=1&quantity=2&tag={tag}"
+    ]
 
 
-def share_button() -> InlineKeyboardButton:
-    share_url = "https://t.me/share/url?url=" + quote_plus("https://t.me/pokemonmonitorpanda") + \
-                "&text=" + quote_plus("🔥 Unisciti a Pokémon Monitor Panda! Restock e offerte in tempo reale.")
-    return InlineKeyboardButton("👥 Condividi / Invita amici", url=share_url)
+# --- MESSAGGIO ---
+async def send_to_channel(p, test=False, price=None):
+    asin = p.get("asin")
+    offeringID = p.get("offeringID")
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Testo messaggio (HTML)
-# ──────────────────────────────────────────────────────────────────────────────
-def render_caption(url: str, title: str | None, price: float | None) -> str:
-    title_line = title if title else "Prodotto Amazon"
-    price_line = f"\n💶 <b>Prezzo attuale:</b> {price:.2f}€" if price is not None else ""
-    caption = (
-        "🐼 <b>POKÉMON MONITOR PANDA</b>\n"
-        "🔥 <b>RESTOCK!</b>\n\n"
-        f"📦 <b>Prodotto:</b> {title_line}\n"
-        "🏪 <b>Venduto da:</b> Amazon"
-        f"{price_line}\n\n"
-        f"🔗 <a href=\"{url}\">Apri su Amazon</a>\n\n"
-        "🛒 <i>Per acquistare durante un restock usa i pulsanti qui sotto.</i>\n\n"
-        f"💬 <a href=\"{CHAT_LINK}\">Unisciti alla chat</a>"
-    )
-    return caption
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Invio nel canale (unico posto dove il bot pubblica)
-# ──────────────────────────────────────────────────────────────────────────────
-async def post_to_channel(context: ContextTypes.DEFAULT_TYPE, url: str, test: bool = False):
-    # Dati live dal prodotto (titolo, immagine, prezzo, asin/offering)
-    info = scrape_amazon(url)
-    asin = info.get("asin")
-    offering = info.get("offeringID")
-
-    # Pulsanti acquisto
-    rows = []
-    if asin and offering:
-        x1, x2 = build_checkout_links(asin, offering)
-        rows.append([
-            InlineKeyboardButton("⚡ x1 Acquisto", url=x1),
-            InlineKeyboardButton("⚡ x2 Acquisto", url=x2),
+    # Pulsanti Amazon
+    buttons = []
+    if asin and offeringID:
+        links = build_checkout_links(asin, offeringID)
+        buttons.append([
+            InlineKeyboardButton("⚡ x1 Acquisto", url=links[0]),
+            InlineKeyboardButton("⚡ x2 Acquisto", url=links[1])
         ])
     else:
-        rows.append([InlineKeyboardButton("🔗 Vai al prodotto", url=url)])
+        buttons.append([InlineKeyboardButton("🔗 Vai al prodotto", url=p["url"])])
 
-    # Pulsante condividi
-    rows.append([share_button()])
-    markup = InlineKeyboardMarkup(rows)
+    # Pulsante invito amici (link share Telegram)
+    share_url = "https://t.me/share/url?url=https://t.me/pokemonmonitorpanda&text=🔥 Unisciti a Pokémon Monitor Panda 🔥"
+    buttons.append([InlineKeyboardButton("👥 Invita amici", url=share_url)])
+    reply_markup = InlineKeyboardMarkup(buttons)
 
-    # Testo/Caption
-    caption = render_caption(url=url, title=info.get("title"), price=info.get("price"))
+    # Testo messaggio
+    caption = "🐼 <b>PANDA ALERT!</b> 🔥\n\n"
+    caption += "🛒 <b>Restock trovato su Amazon!</b>\n\n"
+    caption += f"📦 <a href='{p['url']}'>Prodotto disponibile</a>\n"
+    if price:
+        caption += f"💶 Prezzo attuale: <b>{price}€</b>\n\n"
+    caption += f"🏪 Venduto da: <b>Amazon</b>\n\n"
+    caption += f"💬 <a href='{CHAT_LINK}'>Unisciti alla chat</a>"
 
-    # Identifica canale
-    chat_id = CHANNEL_ID if CHANNEL_ID is not None else f"@{CHANNEL_USERNAME}"
-
-    # Invio come foto (se disponibile) così i pulsanti stanno sotto l’immagine
-    photo_url = info.get("image") or PLACEHOLDER_IMG
-    try:
-        await context.bot.send_photo(
-            chat_id=chat_id,
-            photo=photo_url,
-            caption=caption,
-            parse_mode="HTML",
-            reply_markup=markup,
-        )
-    except Exception as e:
-        logger.warning(f"send_photo fallito ({e}), provo send_message…")
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=caption,
-            parse_mode="HTML",
-            reply_markup=markup,
-        )
+    return caption, reply_markup
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Comandi
-# ──────────────────────────────────────────────────────────────────────────────
+# --- COMANDI TELEGRAM ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👋 Ciao! Usa /help per vedere i comandi disponibili.")
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Ciao! Sono il bot di 🐼 Pokémon Monitor Panda.\n"
-        "Usa /help per i comandi."
+        "📋 Comandi disponibili:\n"
+        "/add <link> <prezzo> - Aggiungi un prodotto\n"
+        "/list - Mostra prodotti salvati\n"
+        "/remove <id> - Elimina prodotto\n"
+        "/test <id> - Forza pubblicazione nel canale"
     )
 
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📋 <b>Comandi</b>\n"
-        "/add &lt;link&gt; &lt;prezzo&gt; – Aggiungi un prodotto\n"
-        "/list – Elenco prodotti salvati\n"
-        "/remove &lt;id&gt; – Rimuovi prodotto\n"
-        "/test &lt;id&gt; – Invio di prova al canale",
-        parse_mode="HTML",
-    )
-
-
-async def add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2:
         await update.message.reply_text("⚠️ Usa: /add <link> <prezzo>")
         return
 
     url = context.args[0]
     try:
-        target = float(context.args[1])
+        target_price = int(context.args[1])
     except ValueError:
-        await update.message.reply_text("⚠️ Il prezzo deve essere un numero (es. 149.99).")
+        await update.message.reply_text("⚠️ Il prezzo deve essere un numero intero.")
         return
 
-    # Scrape veloce per salvare asin/offering (se disponibili ora)
-    info = scrape_amazon(url)
+    price, asin, offeringID = get_price_asin_offering(url)
 
     products = load_products()
     products.append({
         "url": url,
-        "target": target,             # non verrà mostrato nei post
-        "asin": info.get("asin"),
-        "offeringID": info.get("offeringID"),
+        "target": target_price,
+        "asin": asin,
+        "offeringID": offeringID
     })
     save_products(products)
 
-    await update.message.reply_text(
-        f"✅ Prodotto aggiunto!\n{url}\n"
-        f"ASIN: {info.get('asin') or '—'} | offeringID: {info.get('offeringID') or '—'}"
-    )
+    await update.message.reply_text(f"✅ Prodotto aggiunto!\n{url}")
 
 
-async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    items = load_products()
-    if not items:
+async def list_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    products = load_products()
+    if not products:
         await update.message.reply_text("📦 Nessun prodotto salvato.")
         return
 
-    msg = ["📋 <b>Prodotti monitorati</b>\n"]
-    for i, p in enumerate(items, start=1):
-        msg.append(f"{i}. <a href=\"{p['url']}\">link</a>  (🎯 {p['target']}€)")
-    await update.message.reply_text("\n".join(msg), parse_mode="HTML", disable_web_page_preview=True)
+    msg = "📋 Prodotti monitorati:\n\n"
+    for i, p in enumerate(products, start=1):
+        msg += f"{i}. {p['url']} → 🎯 {p['target']}€\n"
+    await update.message.reply_text(msg)
 
 
-async def remove_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def remove_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("⚠️ Usa: /remove <id>")
         return
+
     try:
         idx = int(context.args[0]) - 1
     except ValueError:
         await update.message.reply_text("⚠️ L'ID deve essere un numero.")
         return
 
-    items = load_products()
-    if idx < 0 or idx >= len(items):
+    products = load_products()
+    if idx < 0 or idx >= len(products):
         await update.message.reply_text("❌ ID non valido.")
         return
 
-    removed = items.pop(idx)
-    save_products(items)
+    removed = products.pop(idx)
+    save_products(products)
     await update.message.reply_text(f"✅ Prodotto rimosso:\n{removed['url']}")
 
 
-async def test_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Invia al canale il prodotto in posizione <id> (sempre e comunque)."""
+async def test_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("⚠️ Usa: /test <id>")
         return
+
     try:
         idx = int(context.args[0]) - 1
     except ValueError:
         await update.message.reply_text("⚠️ L'ID deve essere un numero.")
         return
 
-    items = load_products()
-    if idx < 0 or idx >= len(items):
+    products = load_products()
+    if idx < 0 or idx >= len(products):
         await update.message.reply_text("❌ ID non valido.")
         return
 
-    url = items[idx]["url"]
-    await post_to_channel(context, url, test=True)
-    await update.message.reply_text("✅ Messaggio di test inviato al canale.")
+    p = products[idx]
+    caption, reply_markup = await send_to_channel(p, test=True)
+
+    await context.bot.send_message(chat_id=CHANNEL_ID, text=caption, reply_markup=reply_markup, parse_mode="HTML")
+    await update.message.reply_text("✅ Messaggio test inviato al canale!")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Job periodico: controlla prezzi e pubblica
-# ──────────────────────────────────────────────────────────────────────────────
+# --- JOB AUTOMATICO ---
 async def price_checker(context: ContextTypes.DEFAULT_TYPE):
-    items = load_products()
-    if not items:
+    products = load_products()
+    if not products:
         return
 
-    for p in items:
-        try:
-            info = scrape_amazon(p["url"])
-            price = info.get("price")
-            target = p.get("target")
-            if price is not None and target is not None and price <= float(target):
-                await post_to_channel(context, p["url"], test=False)
-        except Exception as e:
-            logger.warning(f"Errore checker su {p.get('url')}: {e}")
+    for p in products:
+        price, asin, offeringID = get_price_asin_offering(p["url"])
+        if price is None:
+            continue
+
+        if price <= p["target"]:
+            if asin:
+                p["asin"] = asin
+            if offeringID:
+                p["offeringID"] = offeringID
+            save_products(products)
+
+            caption, reply_markup = await send_to_channel(p, price=price)
+            await context.bot.send_message(chat_id=CHANNEL_ID, text=caption, reply_markup=reply_markup, parse_mode="HTML")
+
+    # Aggiungi un delay random tra 0.5 e 1.5 secondi
+    await asyncio.sleep(random.uniform(0.5, 1.5))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Inizializzazione: risolviamo l'ID numerico del canale
-# ──────────────────────────────────────────────────────────────────────────────
-async def _post_init(app: Application):
-    global CHANNEL_ID
-    try:
-        chat = await app.bot.get_chat(f"@{CHANNEL_USERNAME}")
-        CHANNEL_ID = chat.id
-        logger.info(f"Canale risolto: @{CHANNEL_USERNAME} -> {CHANNEL_ID}")
-    except Exception as e:
-        CHANNEL_ID = None
-        logger.warning(f"Impossibile risolvere ID canale, userò @{CHANNEL_USERNAME}. Dettagli: {e}")
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Main
-# ──────────────────────────────────────────────────────────────────────────────
+# --- MAIN ---
 def main():
-    if not TOKEN:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN non impostato.")
+    application = Application.builder().token(TOKEN).build()
 
-    app = Application.builder().token(TOKEN).post_init(_post_init).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("add", add_product))
+    application.add_handler(CommandHandler("list", list_products))
+    application.add_handler(CommandHandler("remove", remove_product))
+    application.add_handler(CommandHandler("test", test_product))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("add", add_cmd))
-    app.add_handler(CommandHandler("list", list_cmd))
-    app.add_handler(CommandHandler("remove", remove_cmd))
-    app.add_handler(CommandHandler("test", test_cmd))
+    job_queue = application.job_queue
+    # Refresh ogni 1 secondo (con delay random interno)
+    job_queue.run_repeating(price_checker, interval=1, first=1)
 
-    app.job_queue.run_repeating(price_checker, interval=60, first=10)
+    application.run_polling()
 
-    app.run_polling(allowed_updates=["message", "edited_message"])
 
 if __name__ == "__main__":
     main()
