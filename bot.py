@@ -214,7 +214,7 @@ async def send_to_channel(p, test=False, price=None):
 
     # Testo messaggio
     text = "🐼 **PANDA ALERT!** 🔥\n\n"
-    text += f"📦 **Prodotto:** {p.get('title', 'Disponibile')}\n"
+    text += f"📦 **Prodotto:** {p.get('title', 'Disponibile')}\n\n"
     if price:
         text += f"💶 **Prezzo attuale:** {price:.2f}€\n"
     text += f"🛒 **Venduto da:** Amazon\n\n"
@@ -286,7 +286,6 @@ async def price_checker(context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(chat_id=CHANNEL_ID, text=text,
                                                reply_markup=reply_markup, parse_mode="Markdown")
 
-    # Delay random tra 1 e 3 secondi
     await asyncio.sleep(random.uniform(1, 3))
 
 
