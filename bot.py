@@ -83,7 +83,7 @@ def get_price_asin_offering(url):
         elif "/d/" in url:
             asin = url.split("/d/")[1].split("?")[0]
 
-        # offeringID (se presente nell'HTML)
+        # offeringID
         offeringID = None
         html = r.text
         if "offeringID" in html:
@@ -99,11 +99,11 @@ def get_price_asin_offering(url):
 
 
 def build_checkout_links(asin, offeringID, tag="pokepanda-21"):
-    """Costruisce i due link carrello rapido con affiliazione (fallback affidabile)."""
-    base = "https://www.amazon.it/gp/aws/cart/add.html"
+    """Costruisce i due link checkout rapidi (con ID affiliato)"""
+    base = "https://www.amazon.it/gp/checkoutportal/enter-checkout.html/ref=dp_mw_buy_now"
     return [
-        f"{base}?AssociateTag={tag}&OfferListingId.1={offeringID}&Quantity.1=1",
-        f"{base}?AssociateTag={tag}&OfferListingId.1={offeringID}&Quantity.1=2"
+        f"{base}?asin={asin}&offeringID={offeringID}&buyNow=1&quantity=1&tag={tag}",
+        f"{base}?asin={asin}&offeringID={offeringID}&buyNow=1&quantity=2&tag={tag}"
     ]
 
 
@@ -204,22 +204,18 @@ async def send_to_channel(p, test=False, price=None):
     # Pulsante invito amici
     share_url = "https://t.me/share/url?url=https://t.me/pokemonmonitorpanda&text=🔥 Unisciti a Pokémon Monitor Panda 🔥"
     buttons.append([InlineKeyboardButton("👥 Condividi / Invita amici", url=share_url)])
+
     reply_markup = InlineKeyboardMarkup(buttons)
 
-    # Testo TUTTO in grassetto (Markdown v1 = *singolo asterisco*)
-    lines = []
-    lines.append("🐼 *RESTOCK* 🐼\n")
-    lines.append(f"📦 *Prodotto:* {p.get('title', 'Disponibile')}\n")
-    if price is not None:
-        lines.append(f"💶 *Prezzo attuale:* {float(price):.2f}€\n")
-    lines.append(f"🎯 *Prezzo target:* {p.get('target', 'N/A')}€\n")
-    lines.append("🛒 *Venduto da:* Amazon\n")
-    # link su riga a parte (non in grassetto per non rompere l'autolink)
-    lines.append("\n💬 *Unisciti alla chat*")
-    lines.append(f"{CHAT_LINK}\n")
-    lines.append("👇 *Scegli subito l’opzione di acquisto:*")
-
-    text = "\n".join(lines)
+    # Testo messaggio
+    text = "*🐼RESTOCK🐼*\n\n"
+    text += f"📦 Prodotto: {p.get('title', 'Disponibile')}\n\n"
+    if price:
+        text += f"💶 Prezzo attuale: {price:.2f}€\n"
+    text += f"🎯 Prezzo target: {p.get('target')}€\n"
+    text += f"🛒 Venduto da: Amazon\n\n"
+    text += f"💬 [Unisciti alla chat]({CHAT_LINK})\n\n"
+    text += "👇 Scegli subito l’opzione di acquisto:"
 
     # Invia con immagine se disponibile
     if p.get("image"):
@@ -245,24 +241,15 @@ async def test_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     p = products[idx]
-    # in /test mostro anche il target come "Prezzo attuale" per anteprima
+    # Nel test mostriamo il "prezzo attuale" uguale al target per prova visiva
     text, reply_markup, image = await send_to_channel(p, test=True, price=p.get("target"))
 
     if image:
-        await context.bot.send_photo(
-            chat_id=CHANNEL_ID,
-            photo=image,
-            caption=text,
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+        await context.bot.send_photo(chat_id=CHANNEL_ID, photo=image, caption=text,
+                                     reply_markup=reply_markup, parse_mode="Markdown")
     else:
-        await context.bot.send_message(
-            chat_id=CHANNEL_ID,
-            text=text,
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+        await context.bot.send_message(chat_id=CHANNEL_ID, text=text,
+                                       reply_markup=reply_markup, parse_mode="Markdown")
 
     await update.message.reply_text("✅ Messaggio test inviato al canale!")
 
@@ -291,22 +278,13 @@ async def price_checker(context: ContextTypes.DEFAULT_TYPE):
 
             text, reply_markup, image = await send_to_channel(p, price=price)
             if image:
-                await context.bot.send_photo(
-                    chat_id=CHANNEL_ID,
-                    photo=image,
-                    caption=text,
-                    reply_markup=reply_markup,
-                    parse_mode="Markdown"
-                )
+                await context.bot.send_photo(chat_id=CHANNEL_ID, photo=image, caption=text,
+                                             reply_markup=reply_markup, parse_mode="Markdown")
             else:
-                await context.bot.send_message(
-                    chat_id=CHANNEL_ID,
-                    text=text,
-                    reply_markup=reply_markup,
-                    parse_mode="Markdown"
-                )
+                await context.bot.send_message(chat_id=CHANNEL_ID, text=text,
+                                               reply_markup=reply_markup, parse_mode="Markdown")
 
-    # piccolo backoff random per non martellare
+    # jitter per non martellare sempre allo stesso istante
     await asyncio.sleep(random.uniform(1, 3))
 
 
