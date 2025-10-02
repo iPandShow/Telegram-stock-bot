@@ -208,12 +208,13 @@ async def send_to_channel(p, test=False, price=None):
     reply_markup = InlineKeyboardMarkup(buttons)
 
     # Testo messaggio
-    text = "🐼 **RESTOCK ALERT!** 🔥\n\n"
+    text = "**🐼RESTOCK🐼**\n\n"
     text += f"📦 **Prodotto:** {p.get('title', 'Disponibile')}\n\n"
     if price:
         text += f"💶 **Prezzo attuale:** {price:.2f}€\n"
+    text += f"🎯 **Prezzo target:** {p.get('target')}€\n"
     text += f"🛒 **Venduto da:** Amazon\n\n"
-    text += f"💬 [Unisciti alla chat]({CHAT_LINK})\n\n"
+    text += f"💬 [**Unisciti alla chat**]({CHAT_LINK})\n\n"
     text += "👇 **Scegli subito l’opzione di acquisto:**"
 
     # Invia con immagine se disponibile
@@ -240,6 +241,7 @@ async def test_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     p = products[idx]
+    # Nel test mostriamo il "prezzo attuale" uguale al target per prova visiva
     text, reply_markup, image = await send_to_channel(p, test=True, price=p.get("target"))
 
     if image:
@@ -282,6 +284,7 @@ async def price_checker(context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(chat_id=CHANNEL_ID, text=text,
                                                reply_markup=reply_markup, parse_mode="Markdown")
 
+    # jitter per non martellare sempre allo stesso istante
     await asyncio.sleep(random.uniform(1, 3))
 
 
