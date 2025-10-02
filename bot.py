@@ -99,7 +99,7 @@ def get_price_asin_offering(url):
 
 
 def build_checkout_links(asin, offeringID, tag="pokepanda-21"):
-    """Costruisce i due link checkout rapidi con affiliate tag"""
+    """Costruisce i due link checkout rapidi (con ID affiliato)"""
     base = "https://www.amazon.it/gp/checkoutportal/enter-checkout.html/ref=dp_mw_buy_now"
     return [
         f"{base}?asin={asin}&offeringID={offeringID}&buyNow=1&quantity=1&tag={tag}",
@@ -204,6 +204,7 @@ async def send_to_channel(p, test=False, price=None):
     # Pulsante invito amici
     share_url = "https://t.me/share/url?url=https://t.me/pokemonmonitorpanda&text=🔥 Unisciti a Pokémon Monitor Panda 🔥"
     buttons.append([InlineKeyboardButton("👥 Condividi / Invita amici", url=share_url)])
+
     reply_markup = InlineKeyboardMarkup(buttons)
 
     # Testo messaggio
@@ -211,10 +212,9 @@ async def send_to_channel(p, test=False, price=None):
     text += f"📦 **Prodotto:** {p.get('title', 'Disponibile')}\n\n"
     if price:
         text += f"💶 **Prezzo attuale:** {price:.2f}€\n"
-        text += f"🎯 **Prezzo target:** {p.get('target')}€\n"
     text += f"🛒 **Venduto da:** Amazon\n\n"
-    text += "👇 Scegli subito l’opzione di acquisto:\n\n"
-    text += f"💬 [Unisciti alla chat]({CHAT_LINK})"
+    text += f"💬 [Unisciti alla chat]({CHAT_LINK})\n\n"
+    text += "👇 **Scegli subito l’opzione di acquisto:**"
 
     # Invia con immagine se disponibile
     if p.get("image"):
