@@ -214,7 +214,7 @@ async def send_to_channel(p, test=False, price=None):
         text += f"💶 Prezzo attuale: {price:.2f}€\n"
     text += f"🎯 Prezzo target: {p.get('target')}€\n"
     text += f"🛒 Venduto da: Amazon\n\n"
-    text += f"💬 Unisciti alla chat → {CHAT_LINK}\n\n"
+    text += f"💬 [Unisciti alla chat]({CHAT_LINK})\n\n"
     text += "👇 Scegli subito l’opzione di acquisto:"
 
     # Invia con immagine se disponibile
