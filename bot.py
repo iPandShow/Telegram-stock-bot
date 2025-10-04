@@ -208,14 +208,14 @@ async def send_to_channel(p, test=False, price=None):
     reply_markup = InlineKeyboardMarkup(buttons)
 
     # Testo messaggio
-    text = "**🐼 RESTOCK! 🔥**\n\n"
-    text += f"📦 Prodotto: {p.get('title', 'Disponibile')}\n\n"
+    text = "<b>🐼 RESTOCK! 🔥</b>\n\n"
+    text += f"📦 <b>Prodotto:</b> {p.get('title', 'Disponibile')}\n\n"
     if price:
-        text += f"💶 Prezzo attuale: {price:.2f}€\n"
-    text += f"🎯 Prezzo target: {p.get('target')}€\n"
-    text += f"🛒 Venduto da: Amazon\n\n"
-    text += f"💬 [Unisciti alla chat]({CHAT_LINK})\n\n"
-    text += "👇 Scegli subito l’opzione di acquisto:"
+        text += f"💶 <b>Prezzo attuale:</b> {price:.2f}€\n"
+    text += f"🎯 <b>Prezzo target:</b> {p.get('target')}€\n"
+    text += f"🛒 <b>Venduto da:</b> Amazon\n\n"
+    text += f'💬 <a href="{CHAT_LINK}">Unisciti alla chat</a>\n\n'
+    text += "👇 <b>Scegli subito l’opzione di acquisto:</b>"
 
     # Invia con immagine se disponibile
     if p.get("image"):
@@ -245,10 +245,10 @@ async def test_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if image:
         await context.bot.send_photo(chat_id=CHANNEL_ID, photo=image, caption=text,
-                                     reply_markup=reply_markup, parse_mode="Markdown")
+                                     reply_markup=reply_markup, parse_mode="HTML")
     else:
         await context.bot.send_message(chat_id=CHANNEL_ID, text=text,
-                                       reply_markup=reply_markup, parse_mode="Markdown")
+                                       reply_markup=reply_markup, parse_mode="HTML")
 
     await update.message.reply_text("✅ Messaggio test inviato al canale!")
 
@@ -278,10 +278,10 @@ async def price_checker(context: ContextTypes.DEFAULT_TYPE):
             text, reply_markup, image = await send_to_channel(p, price=price)
             if image:
                 await context.bot.send_photo(chat_id=CHANNEL_ID, photo=image, caption=text,
-                                             reply_markup=reply_markup, parse_mode="Markdown")
+                                             reply_markup=reply_markup, parse_mode="HTML")
             else:
                 await context.bot.send_message(chat_id=CHANNEL_ID, text=text,
-                                               reply_markup=reply_markup, parse_mode="Markdown")
+                                               reply_markup=reply_markup, parse_mode="HTML")
 
     await asyncio.sleep(random.uniform(1, 3))
 
